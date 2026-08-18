@@ -33,6 +33,14 @@ async function staticFile(pathname: string) {
 
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  if (url.pathname === "/healthz") {
+    response.statusCode = 200;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.end('{"status":"ok"}');
+    return;
+  }
   if (url.pathname === "/api/nbb-stats") {
     void api(request, response);
     return;

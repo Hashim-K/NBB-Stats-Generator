@@ -147,6 +147,11 @@ The example Compose stack exposes port `4173` and stores the NBB-Stats SQLite
 cache in the `nbb-cache` volume. Configure a real contact value before making
 source requests.
 
+Every push to `main` also publishes `linux/amd64` images to
+`ghcr.io/hashim-k/nbb-stats-generator` with immutable `main-<commit>` and
+moving `latest` tags. [`deploy/compose.yml`](deploy/compose.yml) is the Dockge
+deployment template used by `nbb-gen.hashimkarim.com`.
+
 Environment variables:
 
 | Variable | Default | Purpose |

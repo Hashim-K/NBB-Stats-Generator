@@ -1,0 +1,23 @@
+services:
+  generator:
+    image: ghcr.io/hashim-k/nbb-stats-generator:latest
+    container_name: nbb-stats-generator
+    environment:
+      HOST: 0.0.0.0
+      NBB_ALLOWED_ORIGINS: https://nbb-gen.hashimkarim.com
+      NBB_CACHE_FILE: /app/.data/nbb-stats.sqlite
+      NBB_CONTACT: https://nbb-gen.hashimkarim.com
+      NBB_UPSTREAM_INTERVAL_MS: 15000
+      PORT: 4173
+    ports:
+      - "127.0.0.1:4186:4173"
+    restart: unless-stopped
+    volumes:
+      - nbb-cache:/app/.data
+
+volumes:
+  nbb-cache:
+
+x-dockge:
+  urls:
+    - https://nbb-gen.hashimkarim.com
