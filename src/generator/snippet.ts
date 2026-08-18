@@ -4,8 +4,8 @@ export const BASKETBALLSTATS_GAMES_URL =
   "https://api.basketballstats.nl/db/json/wedstrijd.pl";
 export const BASKETBALLSTATS_STANDINGS_URL =
   "https://www.basketballstats.nl/db/json/stand.pl";
-export const BASKETBALLSTATS_WIDGET_SCRIPT_URL =
-  "https://www.basketballstats.nl/db/json/nbb-stats-widget.js";
+export const NBB_STATS_WIDGET_SCRIPT_URL =
+  "https://nbb-gen.hashimkarim.com/nbb-stats-widget.js";
 
 function positive(value: number | undefined, label: string) {
   if (value === undefined || !Number.isInteger(value) || value <= 0) {
@@ -99,7 +99,7 @@ export function basketballstatsRequestUrl(config: WidgetConfig, base?: string) {
 
 export function generateSnippet(
   config: WidgetConfig,
-  scriptUrl = BASKETBALLSTATS_WIDGET_SCRIPT_URL,
+  scriptUrl = NBB_STATS_WIDGET_SCRIPT_URL,
 ) {
   const attributes: Array<string | undefined> = [
     `club-id="${positive(config.clubId, "clubId")}"`,

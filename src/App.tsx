@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  BASKETBALLSTATS_WIDGET_SCRIPT_URL,
+  NBB_STATS_WIDGET_SCRIPT_URL,
   generateSnippet,
 } from "./generator/snippet";
 import type { GamesWidgetConfig, StandingsWidgetConfig, WidgetConfig } from "./widget/types";
@@ -76,7 +76,9 @@ export function App() {
   const publicBase = (import.meta.env.VITE_NBB_PUBLIC_URL as string | undefined)?.replace(/\/$/, "") || window.location.origin;
   const apiUrl = `${publicBase}/api/nbb-stats`;
   const scriptUrl = (import.meta.env.VITE_NBB_WIDGET_SCRIPT_URL as string | undefined)
-    || BASKETBALLSTATS_WIDGET_SCRIPT_URL;
+    || (publicBase === window.location.origin
+      ? `${publicBase}/nbb-stats-widget.js`
+      : NBB_STATS_WIDGET_SCRIPT_URL);
   const [kind, setKind] = useState<"games" | "standings">("games");
   const [clubId, setClubId] = useState("57");
   const [season, setSeason] = useState(inferredSeason());
@@ -261,7 +263,7 @@ export function App() {
           <section className="code-card">
             <div className="code-heading"><div><span>02</span><h2>Copy and paste</h2></div><button onClick={() => void copyCode()} disabled={!config}>{copied ? "Copied" : "Copy code"}</button></div>
             <pre><code>{snippet}</code></pre>
-            <p className="code-note">Paste this into an HTML/Code block in WordPress, Squarespace, or another website builder. The exported script and JSON requests point to Basketballstats; no NBB-Stats backend is required by the club website.</p>
+            <p className="code-note">Paste this into an HTML/Code block in WordPress, Squarespace, or another website builder. The widget script is served by NBB Stats Generator; only its rate-limited JSON data requests go to Basketballstats.</p>
           </section>
         </div>
       </section>

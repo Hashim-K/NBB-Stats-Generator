@@ -3,7 +3,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
-  BASKETBALLSTATS_WIDGET_SCRIPT_URL,
+  NBB_STATS_WIDGET_SCRIPT_URL,
   generateSnippet,
   widgetRequestUrl,
 } from "../src/generator/snippet";
@@ -89,9 +89,10 @@ afterEach(() => {
 });
 
 describe("generated embed data path", () => {
-  it("generates Basketballstats-hosted code without the preview gateway", () => {
+  it("loads our widget script without the preview gateway", () => {
     const snippet = generateSnippet(gamesConfig);
-    expect(snippet).toContain(`src="${BASKETBALLSTATS_WIDGET_SCRIPT_URL}"`);
+    expect(snippet).toContain(`src="${NBB_STATS_WIDGET_SCRIPT_URL}"`);
+    expect(snippet).not.toContain("basketballstats.nl/db/json/nbb-stats-widget.js");
     expect(snippet).toContain("<nbb-games");
     expect(snippet).not.toContain("api-url");
   });

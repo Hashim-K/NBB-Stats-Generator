@@ -11,8 +11,9 @@ The project deliberately has two data paths:
 | Configurator live preview | `nbb-stats` server client | Shared SQLite cache, source-aware refresh schedule, global 15-second upstream queue |
 | Generated club embed | Basketballstats JSON | Per-site/per-browser `localStorage`, one shared 15-second source queue, duplicate-call coalescing, crawler checks |
 
-The generated code does **not** depend on the generator backend. Its script and
-JSON URLs point to Basketballstats.
+The generated code loads the standalone widget script from NBB Stats Generator.
+The script then requests only JSON data from Basketballstats; it never uses the
+generator preview API.
 
 > This is community-maintained software and is not an official product of
 > Basketball Nederland or Basketballstats. Basketballstats and its data feeds
@@ -53,7 +54,7 @@ from each new browser can still make a source request.
 The configurator produces markup like this:
 
 ```html
-<script defer src="https://www.basketballstats.nl/db/json/nbb-stats-widget.js"></script>
+<script defer src="https://nbb-gen.hashimkarim.com/nbb-stats-widget.js"></script>
 <nbb-games
   club-id="57"
   season="2026-2027"
@@ -67,9 +68,11 @@ The configurator produces markup like this:
 ></nbb-games>
 ```
 
-Once `nbb-stats-widget.js` is installed at that Basketballstats URL, this can be
-pasted into a WordPress Custom HTML block, an Elementor HTML widget, a
-Squarespace Code block, or any page that permits scripts and custom elements.
+This can be pasted directly into a WordPress Custom HTML block, an Elementor
+HTML widget, a Squarespace Code block, or any page that permits scripts and
+custom elements. The script executes in the club website's browser context, so
+its `localStorage` cache and shared 15-second request timestamp belong to that
+website origin—not to the generator.
 
 ### Games attributes
 
@@ -125,16 +128,16 @@ npm run build
 This produces:
 
 - `dist/site/` — the configurator frontend;
-- `dist/site/nbb-stats-widget.js` — the standalone browser widget that should
-  be hosted by Basketballstats;
+- `dist/site/nbb-stats-widget.js` — the standalone browser widget served by the
+  generator deployment;
 - `dist/server/index.js` — the Node server for the configurator and its cached
   preview API.
 
-To test a different script location in generated snippets, set
+To use a different script location in generated snippets, set
 `VITE_NBB_WIDGET_SCRIPT_URL` before building. Production output defaults to:
 
 ```text
-https://www.basketballstats.nl/db/json/nbb-stats-widget.js
+https://nbb-gen.hashimkarim.com/nbb-stats-widget.js
 ```
 
 ## Run the configurator with Docker
