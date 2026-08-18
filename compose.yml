@@ -1,0 +1,17 @@
+services:
+  generator:
+    build: .
+    environment:
+      HOST: 0.0.0.0
+      NBB_CACHE_FILE: /app/.data/nbb-stats.sqlite
+      NBB_CONTACT: ${NBB_CONTACT:-https://github.com/Hashim-K/NBB-Stats-Generator}
+      NBB_UPSTREAM_INTERVAL_MS: 15000
+      PORT: 4173
+    ports:
+      - "4173:4173"
+    restart: unless-stopped
+    volumes:
+      - nbb-cache:/app/.data
+
+volumes:
+  nbb-cache:
