@@ -364,7 +364,11 @@ export function App() {
     teamId, theme, venue, view,
   ]);
 
-  const previewConfig = useDebouncedValue(config ? { ...config, apiUrl } : undefined, 250);
+  const previewCandidate = useMemo(
+    () => config ? { ...config, apiUrl } : undefined,
+    [apiUrl, config],
+  );
+  const previewConfig = useDebouncedValue(previewCandidate, 250);
   const snippet = useMemo(() => {
     if (!config) return "Complete the required fields to generate the embed code.";
     try { return generateSnippet(config, scriptUrl); }
