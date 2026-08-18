@@ -1,12 +1,17 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 
+import { App } from "../src/App";
 import {
   NBB_STATS_WIDGET_SCRIPT_URL,
   generateSnippet,
   widgetRequestUrl,
 } from "../src/generator/snippet";
+import { choicesWithinSelection } from "../src/options/filter";
+import type { ClubOptionsResponse } from "../src/options/types";
 import { readResponseCache, writeResponseCache } from "../src/widget/cache";
 import {
   directRefreshAfter,
@@ -82,7 +87,31 @@ const rawGames = {
   ],
 };
 
+const guidedData: ClubOptionsResponse["data"] = {
+  competitions: [
+    { id: 10, name: "League A" },
+    { id: 20, name: "League B" },
+  ],
+  gameFilters: [
+    { competitionId: 10, completed: true, locationId: 100, startAt: "2026-08-10T18:00:00Z", teamId: 1, venue: "home" },
+    { competitionId: 20, completed: false, locationId: 200, startAt: "2026-08-30T18:00:00Z", teamId: 2, venue: "away" },
+  ],
+  locations: [
+    { id: 100, name: "Home Hall" },
+    { id: 200, name: "Away Hall" },
+  ],
+  teamCompetitions: [
+    { competitionId: 10, teamId: 1 },
+    { competitionId: 20, teamId: 2 },
+  ],
+  teams: [
+    { id: 1, name: "Team 1" },
+    { id: 2, name: "Team 2" },
+  ],
+};
+
 beforeAll(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const storage = new TestStorage();
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
   Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
@@ -159,6 +188,79 @@ describe("generated embed data path", () => {
     expect(url.hostname).toBe("www.basketballstats.nl");
     expect(url.searchParams.get("cmp_ID")).toBe("4180");
     expect(url.hash).toBe("#records");
+  });
+});
+
+describe("guided option relationships", () => {
+  it("does not leak the manual default competition into Names mode", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/nbb-options") {
+        return Response.json({
+          data: [{ id: 57, name: "Punch" }],
+          meta: {
+            cache: "persistent-nbb-stats",
+            generatedAt: new Date().toISOString(),
+            refreshAfter: null,
+            resource: "clubs",
+            season: null,
+          },
+        });
+      }
+      return Response.json({
+        data: [],
+        meta: {
+          cache: "persistent-nbb-stats",
+          generatedAt: new Date().toISOString(),
+          refreshAfter: null,
+          resource: "games",
+          season: "2025-2026",
+        },
+      });
+    });
+    const mount = document.createElement("div");
+    document.body.append(mount);
+    const root = createRoot(mount);
+    await act(async () => root.render(createElement(App)));
+    const names = [...mount.querySelectorAll<HTMLButtonElement>(".mini-segmented button")]
+      .find((button) => button.textContent === "Names")!;
+    await act(async () => names.click());
+    const competition = [...mount.querySelectorAll<HTMLLabelElement>("label.field")]
+      .find((field) => field.querySelector(":scope > span")?.textContent === "Competition")!
+      .querySelector("select")!;
+    expect(competition.value).toBe("");
+    expect(competition.selectedOptions[0]?.textContent).toBe("Choose a club first");
+    const ids = [...mount.querySelectorAll<HTMLButtonElement>(".mini-segmented button")]
+      .find((button) => button.textContent === "IDs")!;
+    await act(async () => ids.click());
+    const competitionId = [...mount.querySelectorAll<HTMLLabelElement>("label.field")]
+      .find((field) => field.querySelector(":scope > span")?.textContent === "Competition ID")!
+      .querySelector("input")!;
+    expect(competitionId.value).toBe("3498");
+    await act(async () => root.unmount());
+  });
+
+  it("only offers competitions and locations possible for the selected team", () => {
+    const choices = choicesWithinSelection(guidedData, { teamId: 1 }, Date.parse("2026-08-18T12:00:00Z"));
+    expect(choices.competitions.map(({ id }) => id)).toEqual([10]);
+    expect(choices.locations.map(({ id }) => id)).toEqual([100]);
+  });
+
+  it("only offers teams possible for a competition or location", () => {
+    expect(choicesWithinSelection(guidedData, { competitionId: 20 }).teams.map(({ id }) => id))
+      .toEqual([2]);
+    const atHome = choicesWithinSelection(guidedData, { locationId: 100 });
+    expect(atHome.teams.map(({ id }) => id)).toEqual([1]);
+    expect(atHome.competitions.map(({ id }) => id)).toEqual([10]);
+  });
+
+  it("narrows venue and result/upcoming filters to games that exist", () => {
+    const past = choicesWithinSelection(guidedData, { teamId: 1 }, Date.parse("2026-08-18T12:00:00Z"));
+    expect(past.venues).toEqual({ away: false, home: true });
+    expect(past.views).toEqual({ results: true, upcoming: false });
+    const future = choicesWithinSelection(guidedData, { teamId: 2 }, Date.parse("2026-08-18T12:00:00Z"));
+    expect(future.venues).toEqual({ away: true, home: false });
+    expect(future.views).toEqual({ results: false, upcoming: true });
   });
 });
 

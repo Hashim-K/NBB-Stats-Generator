@@ -7,8 +7,10 @@ import {
 import type {
   ClubOptionsResponse,
   ClubsOptionsResponse,
+  CompetitionOptionsResponse,
   NamedOption,
 } from "./options/types";
+import { choicesWithinSelection } from "./options/filter";
 import {
   defaultGameColumns,
   defaultStandingsColumns,
@@ -26,6 +28,16 @@ import type {
 
 const JAAP_DEFAULT_SEASON = "2025-2026";
 const JAAP_DEFAULT_COMPETITION = "3498";
+
+function emptyClubOptions(): ClubOptionsResponse["data"] {
+  return {
+    competitions: [],
+    gameFilters: [],
+    locations: [],
+    teamCompetitions: [],
+    teams: [],
+  };
+}
 
 function inferredSeason() {
   const now = new Date();
@@ -166,12 +178,10 @@ function NamedSelect({ value, options, emptyLabel, onChange, disabled }: {
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
-  const selected = positiveOrUndefined(value);
-  const unresolved = selected !== undefined && !options.some(({ id }) => id === selected);
+  const resolvedValue = value && options.some(({ id }) => String(id) === value) ? value : "";
   return (
-    <Select value={value} onChange={onChange} disabled={disabled}>
+    <Select value={resolvedValue} onChange={onChange} disabled={disabled}>
       <option value="">{emptyLabel}</option>
-      {unresolved ? <option value={value}>ID {value} (not in this list)</option> : null}
       {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
     </Select>
   );
@@ -265,17 +275,41 @@ export function App() {
   const [locale, setLocale] = useState<WidgetConfig["locale"]>("nl");
   const [accent, setAccent] = useState("#ef4b23");
   const [clubs, setClubs] = useState<NamedOption[]>([]);
-  const [clubOptions, setClubOptions] = useState<ClubOptionsResponse["data"]>({ competitions: [], locations: [], teams: [] });
-  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [clubOptions, setClubOptions] = useState<ClubOptionsResponse["data"]>(emptyClubOptions);
+  const [competitionClubs, setCompetitionClubs] = useState<NamedOption[]>([]);
+  const [clubsLoading, setClubsLoading] = useState(false);
+  const [clubOptionsLoading, setClubOptionsLoading] = useState(false);
+  const [competitionClubsLoading, setCompetitionClubsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState("");
   const [copied, setCopied] = useState(false);
+  const selectionSnapshots = useRef({
+    guided: {
+      clubId: "",
+      competitionId: "",
+      highlightClubId: "",
+      locationId: "",
+      season: JAAP_DEFAULT_SEASON,
+      teamId: "",
+    },
+    manual: {
+      clubId: "",
+      competitionId: JAAP_DEFAULT_COMPETITION,
+      highlightClubId: "",
+      locationId: "",
+      season: JAAP_DEFAULT_SEASON,
+      teamId: "",
+    },
+  });
 
   useEffect(() => {
-    if (selectionMode !== "guided" || clubs.length) return;
+    if (selectionMode !== "guided" || clubs.length) {
+      setClubsLoading(false);
+      return;
+    }
     const controller = new AbortController();
-    setOptionsLoading(true);
+    setClubsLoading(true);
     setOptionsError("");
-    fetch(`${optionsUrl}?resource=clubs&schema=2`, { headers: { Accept: "application/json" }, signal: controller.signal })
+    fetch(`${optionsUrl}?resource=clubs&schema=3`, { headers: { Accept: "application/json" }, signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Could not load clubs (${response.status})`);
         return response.json() as Promise<ClubsOptionsResponse>;
@@ -284,20 +318,21 @@ export function App() {
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setOptionsError(error instanceof Error ? error.message : "Could not load clubs");
       })
-      .finally(() => { if (!controller.signal.aborted) setOptionsLoading(false); });
+      .finally(() => { if (!controller.signal.aborted) setClubsLoading(false); });
     return () => controller.abort();
   }, [clubs.length, optionsUrl, selectionMode]);
 
   useEffect(() => {
     const selectedClub = positiveOrUndefined(clubId);
     if (selectionMode !== "guided" || !selectedClub || !/^\d{4}-\d{4}$/.test(season)) {
-      setClubOptions({ competitions: [], locations: [], teams: [] });
+      setClubOptions(emptyClubOptions());
+      setClubOptionsLoading(false);
       return;
     }
     const controller = new AbortController();
-    setOptionsLoading(true);
+    setClubOptionsLoading(true);
     setOptionsError("");
-    const parameters = new URLSearchParams({ resource: "club", clubId: String(selectedClub), season, schema: "2" });
+    const parameters = new URLSearchParams({ resource: "club", clubId: String(selectedClub), season, schema: "3" });
     fetch(`${optionsUrl}?${parameters}`, { headers: { Accept: "application/json" }, signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Could not load club choices (${response.status})`);
@@ -307,9 +342,63 @@ export function App() {
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setOptionsError(error instanceof Error ? error.message : "Could not load club choices");
       })
-      .finally(() => { if (!controller.signal.aborted) setOptionsLoading(false); });
+      .finally(() => { if (!controller.signal.aborted) setClubOptionsLoading(false); });
     return () => controller.abort();
   }, [clubId, optionsUrl, season, selectionMode]);
+
+  useEffect(() => {
+    const selectedClub = positiveOrUndefined(clubId);
+    const selectedCompetition = positiveOrUndefined(competitionId);
+    if (selectionMode !== "guided"
+      || kind !== "standings"
+      || !selectedClub
+      || !selectedCompetition
+      || !/^\d{4}-\d{4}$/.test(season)) {
+      setCompetitionClubs([]);
+      setCompetitionClubsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setCompetitionClubsLoading(true);
+    setOptionsError("");
+    const parameters = new URLSearchParams({
+      resource: "competition",
+      clubId: String(selectedClub),
+      competitionId: String(selectedCompetition),
+      season,
+      schema: "3",
+    });
+    fetch(`${optionsUrl}?${parameters}`, { headers: { Accept: "application/json" }, signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Could not load competition clubs (${response.status})`);
+        return response.json() as Promise<CompetitionOptionsResponse>;
+      })
+      .then((response) => {
+        setCompetitionClubs(response.data.clubs);
+        setHighlightClubId((current) => response.data.clubs.some(({ id }) => String(id) === current) ? current : "");
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setOptionsError(error instanceof Error ? error.message : "Could not load competition clubs");
+      })
+      .finally(() => { if (!controller.signal.aborted) setCompetitionClubsLoading(false); });
+    return () => controller.abort();
+  }, [clubId, competitionId, kind, optionsUrl, season, selectionMode]);
+
+  const guidedChoices = useMemo(() => choicesWithinSelection(clubOptions, {
+    competitionId: positiveOrUndefined(competitionId),
+    locationId: positiveOrUndefined(locationId),
+    teamId: positiveOrUndefined(teamId),
+    venue,
+    view,
+  }), [clubOptions, competitionId, locationId, teamId, venue, view]);
+
+  useEffect(() => {
+    if (selectionMode !== "guided" || kind !== "games" || clubOptionsLoading) return;
+    if (venue === "home" && !guidedChoices.venues.home) setVenue("all");
+    if (venue === "away" && !guidedChoices.venues.away) setVenue("all");
+    if (view === "results" && !guidedChoices.views.results) setView("all");
+    if (view === "upcoming" && !guidedChoices.views.upcoming) setView("all");
+  }, [clubOptionsLoading, guidedChoices, kind, selectionMode, venue, view]);
 
   const resolvedSeason = /^\d{4}-\d{4}$/.test(season) ? season : undefined;
   const config = useMemo<WidgetConfig | undefined>(() => {
@@ -387,6 +476,9 @@ export function App() {
     setTeamId("");
     setLocationId("");
     setCompetitionId("");
+    setHighlightClubId("");
+    setClubOptions(emptyClubOptions());
+    setCompetitionClubs([]);
   }
 
   function changeGuidedSeason(value: string) {
@@ -394,26 +486,85 @@ export function App() {
     setTeamId("");
     setLocationId("");
     setCompetitionId("");
+    setHighlightClubId("");
+    setClubOptions(emptyClubOptions());
+    setCompetitionClubs([]);
+  }
+
+  function changeGuidedCompetition(value: string) {
+    setCompetitionId(value);
+    setHighlightClubId("");
+  }
+
+  function changeSelectionMode(next: "guided" | "manual") {
+    if (next === selectionMode) return;
+    selectionSnapshots.current[selectionMode] = {
+      clubId,
+      competitionId,
+      highlightClubId,
+      locationId,
+      season,
+      teamId,
+    };
+    const restored = selectionSnapshots.current[next];
+    setClubId(restored.clubId);
+    setCompetitionId(restored.competitionId);
+    setHighlightClubId(restored.highlightClubId);
+    setLocationId(restored.locationId);
+    setSeason(restored.season);
+    setTeamId(restored.teamId);
+    setClubOptions(emptyClubOptions());
+    setCompetitionClubs([]);
+    setOptionsError("");
+    setSelectionMode(next);
   }
 
   const dataFields = selectionMode === "guided" ? (
     <>
       <Field label="Club" hint="Names are loaded through the cached NBB-Stats backend">
-        <NamedSelect value={clubId} options={clubs} emptyLabel={optionsLoading && !clubs.length ? "Loading clubs…" : "Choose a club"} onChange={changeGuidedClub} disabled={optionsLoading && !clubs.length} />
+        <NamedSelect value={clubId} options={clubs} emptyLabel={clubsLoading && !clubs.length ? "Loading clubs…" : "Choose a club"} onChange={changeGuidedClub} disabled={clubsLoading && !clubs.length} />
       </Field>
       <Field label="Season">
         <Select value={season} onChange={changeGuidedSeason}>{availableSeasons().map((value) => <option key={value}>{value}</option>)}</Select>
       </Field>
       <Field label="Competition" hint={kind === "standings" ? "Required" : "Optional filter"}>
-        <NamedSelect value={competitionId} options={clubOptions.competitions} emptyLabel={positiveOrUndefined(clubId) ? "All competitions" : "Choose a club first"} onChange={setCompetitionId} disabled={!positiveOrUndefined(clubId) || optionsLoading} />
+        <NamedSelect
+          value={competitionId}
+          options={guidedChoices.competitions}
+          emptyLabel={!positiveOrUndefined(clubId)
+            ? "Choose a club first"
+            : clubOptionsLoading
+              ? "Loading competitions…"
+              : kind === "standings"
+                ? "Choose a competition"
+                : guidedChoices.competitions.length ? "All competitions" : "No matching competitions"}
+          onChange={changeGuidedCompetition}
+          disabled={!positiveOrUndefined(clubId) || clubOptionsLoading}
+        />
       </Field>
       {kind === "games" ? (
         <>
           <Field label="Team" hint="Optional filter">
-            <NamedSelect value={teamId} options={clubOptions.teams} emptyLabel={positiveOrUndefined(clubId) ? "All club teams" : "Choose a club first"} onChange={setTeamId} disabled={!positiveOrUndefined(clubId) || optionsLoading} />
+            <NamedSelect
+              value={teamId}
+              options={guidedChoices.teams}
+              emptyLabel={!positiveOrUndefined(clubId)
+                ? "Choose a club first"
+                : clubOptionsLoading ? "Loading teams…" : guidedChoices.teams.length ? "All club teams" : "No matching teams"}
+              onChange={setTeamId}
+              disabled={!positiveOrUndefined(clubId) || clubOptionsLoading}
+            />
           </Field>
           <Field label="Location" hint="Optional filter">
-            <NamedSelect value={locationId} options={clubOptions.locations} emptyLabel={positiveOrUndefined(clubId) ? "All locations" : "Choose a club first"} onChange={setLocationId} disabled={!positiveOrUndefined(clubId) || optionsLoading} />
+            <NamedSelect
+              value={locationId}
+              options={guidedChoices.locations}
+              emptyLabel={!positiveOrUndefined(clubId)
+                ? "Choose a club first"
+                : clubOptionsLoading ? "Loading locations…" : guidedChoices.locations.length ? "All locations" : "No matching locations"}
+              onChange={setLocationId}
+              disabled={!positiveOrUndefined(clubId) || clubOptionsLoading}
+            />
           </Field>
         </>
       ) : null}
@@ -481,8 +632,8 @@ export function App() {
             <div className="form-title-row">
               <h3>Data source</h3>
               <div className="mini-segmented" aria-label="Data selection mode">
-                <button type="button" className={selectionMode === "manual" ? "active" : ""} onClick={() => setSelectionMode("manual")}>IDs</button>
-                <button type="button" className={selectionMode === "guided" ? "active" : ""} onClick={() => setSelectionMode("guided")}>Names</button>
+                <button type="button" className={selectionMode === "manual" ? "active" : ""} onClick={() => changeSelectionMode("manual")}>IDs</button>
+                <button type="button" className={selectionMode === "guided" ? "active" : ""} onClick={() => changeSelectionMode("guided")}>Names</button>
               </div>
             </div>
             <div className="field-grid">{dataFields}</div>
@@ -496,12 +647,16 @@ export function App() {
               <div className="field-grid">
                 <Field label="Show">
                   <Select value={view} onChange={(value) => setView(value as GamesWidgetConfig["view"])}>
-                    <option value="all">All games</option><option value="upcoming">Upcoming</option><option value="results">Results</option>
+                    <option value="all">All games</option>
+                    {(selectionMode !== "guided" || clubOptionsLoading || guidedChoices.views.upcoming) ? <option value="upcoming">Upcoming</option> : null}
+                    {(selectionMode !== "guided" || clubOptionsLoading || guidedChoices.views.results) ? <option value="results">Results</option> : null}
                   </Select>
                 </Field>
                 <Field label="Venue">
                   <Select value={venue} onChange={(value) => setVenue(value as GamesWidgetConfig["venue"])}>
-                    <option value="all">Home and away</option><option value="home">Home only</option><option value="away">Away only</option>
+                    <option value="all">Home and away</option>
+                    {(selectionMode !== "guided" || clubOptionsLoading || guidedChoices.venues.home) ? <option value="home">Home only</option> : null}
+                    {(selectionMode !== "guided" || clubOptionsLoading || guidedChoices.venues.away) ? <option value="away">Away only</option> : null}
                   </Select>
                 </Field>
                 <Field label="Layout">
@@ -526,9 +681,17 @@ export function App() {
                     <option value="table">Table</option><option value="combined">Table + points bars</option><option value="bars">Points bars</option>
                   </Select>
                 </Field>
-                <Field label="Highlight club ID" hint="Optional; marks your club">
+                <Field label={selectionMode === "guided" ? "Highlight club" : "Highlight club ID"} hint="Optional; marks a club in this competition">
                   {selectionMode === "guided"
-                    ? <NamedSelect value={highlightClubId} options={clubs} emptyLabel="No highlighted club" onChange={setHighlightClubId} />
+                    ? <NamedSelect
+                        value={highlightClubId}
+                        options={competitionClubs}
+                        emptyLabel={!positiveOrUndefined(competitionId)
+                          ? "Choose a competition first"
+                          : competitionClubsLoading ? "Loading eligible clubs…" : competitionClubs.length ? "No highlighted club" : "No clubs available"}
+                        onChange={setHighlightClubId}
+                        disabled={!positiveOrUndefined(competitionId) || competitionClubsLoading}
+                      />
                     : <input inputMode="numeric" value={highlightClubId} onChange={(event) => setHighlightClubId(event.target.value)} placeholder="None" />}
                 </Field>
                 <Toggle checked={standingsSorting} label="Sortable columns" onChange={setStandingsSorting} />

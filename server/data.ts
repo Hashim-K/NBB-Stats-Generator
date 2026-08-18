@@ -76,8 +76,21 @@ function standingsWithoutPrivateFields({ raw: _raw, competitionNumber: _number, 
 }
 
 function namedOptions(entries: NamedOption[]) {
-  return [...new Map(entries.map((entry) => [entry.id, entry])).values()]
+  const unique = [...new Map(entries.map((entry) => [entry.id, entry])).values()];
+  const nameCounts = new Map<string, number>();
+  for (const { name } of unique) {
+    const key = name.trim().toLocaleLowerCase("nl");
+    nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
+  return unique
+    .map((entry) => nameCounts.get(entry.name.trim().toLocaleLowerCase("nl"))! > 1
+      ? { ...entry, name: `${entry.name} — ID ${entry.id}` }
+      : entry)
     .sort((left, right) => left.name.localeCompare(right.name, "nl", { numeric: true }));
+}
+
+function uniqueLinks<Link>(entries: Link[], key: (entry: Link) => string) {
+  return [...new Map(entries.map((entry) => [key(entry), entry])).values()];
 }
 
 function positive(parameters: URLSearchParams, name: string, required = false) {
@@ -181,7 +194,7 @@ export async function selectionOptions(
   parameters: URLSearchParams,
   refresh: RefreshMode,
 ): Promise<SelectionOptionsResponse> {
-  const resource = choice(parameters, "resource", ["clubs", "club"] as const, "clubs");
+  const resource = choice(parameters, "resource", ["clubs", "club", "competition"] as const, "clubs");
 
   if (resource === "clubs") {
     const client = clientFor(DIRECTORY_CLIENT_ID);
@@ -201,6 +214,33 @@ export async function selectionOptions(
   const clubId = positive(parameters, "clubId", true)!;
   const selectedSeason = season(parameters);
   const client = clientFor(clubId);
+
+  if (resource === "competition") {
+    const competitionId = positive(parameters, "competitionId", true)!;
+    const [standings, clubs] = await Promise.all([
+      client.standings(competitionId, { season: selectedSeason, refresh }),
+      client.clubs({ refresh }),
+    ]);
+    const clubNames = new Map(clubs.map(({ id, name }) => [id, name]));
+    return {
+      data: {
+        clubs: namedOptions(standings.entries.map((entry) => ({
+          id: entry.clubId,
+          name: clubNames.get(entry.clubId) ?? entry.team,
+        }))),
+      },
+      meta: {
+        cache: "persistent-nbb-stats",
+        generatedAt: new Date().toISOString(),
+        refreshAfter: isHistoricalSeason(selectedSeason, client.currentSeason)
+          ? null
+          : client.nextRefreshAt().toISOString(),
+        resource,
+        season: selectedSeason,
+      },
+    };
+  }
+
   const [teams, competitions, games] = await Promise.all([
     client.teams({ season: selectedSeason, refresh }),
     client.competitions({ season: selectedSeason, refresh }),
@@ -212,10 +252,31 @@ export async function selectionOptions(
         name: game.city ? `${game.venue} — ${game.city}` : game.venue,
       }]
     : []));
+  const teamCompetitions = uniqueLinks(
+    teams.map(({ id, competitionId }) => ({ teamId: id, competitionId })),
+    (link) => `${link.teamId}:${link.competitionId}`,
+  );
+  const gameFilters = uniqueLinks(games.flatMap((game) => {
+    const teamId = game.homeClubId === clubId
+      ? game.homeTeamId
+      : game.awayClubId === clubId
+        ? game.awayTeamId
+        : undefined;
+    return teamId === undefined ? [] : [{
+      competitionId: game.competitionId,
+      completed: game.completed,
+      ...(game.locationId === undefined ? {} : { locationId: game.locationId }),
+      startAt: game.startAt,
+      teamId,
+      venue: game.homeClubId === clubId ? "home" as const : "away" as const,
+    }];
+  }), (link) => `${link.teamId}:${link.competitionId}:${link.locationId ?? ""}:${link.venue}:${link.completed}:${link.startAt}`);
   return {
     data: {
       competitions: namedOptions(competitions.map(({ id, name }) => ({ id, name }))),
+      gameFilters,
       locations,
+      teamCompetitions,
       teams: namedOptions(teams.map(({ id, name }) => ({ id, name }))),
     },
     meta: {

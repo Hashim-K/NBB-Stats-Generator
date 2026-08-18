@@ -137,6 +137,14 @@ The **IDs / Names** switch changes only how source filters are selected:
 - **Names** loads cached club names first, then the teams, competitions, and
   game locations for the selected club and season.
 
+Names mode keeps its state separate from ID mode. Its team, competition,
+location, home/away, and result/upcoming choices are faceted: every option
+shown is compatible with the other active filters. The standings highlight
+selector is populated from the selected competition's actual standings, so it
+cannot offer an unrelated club. If the source contains distinct records with
+the same visible name, the UI appends their Basketballstats IDs instead of
+showing two indistinguishable labels.
+
 Name discovery uses the persistent NBB-Stats preview cache and the same global
 15-second upstream queue. It is never included in generated embeds. On a cold
 cache, the first club/season selection can therefore take a little while;
@@ -211,7 +219,9 @@ The preview routes are `GET /api/nbb-stats` and `GET /api/nbb-options`. They
 accept browser requests only, rate-limit clients, and put recognised crawlers
 into cache-only mode. `/api/nbb-options?resource=clubs` returns the club index;
 `/api/nbb-options?resource=club&clubId=57&season=2025-2026` returns named
-teams, competitions, and locations for one selection.
+teams, competitions, locations, and their filter relationships for one
+selection. `resource=competition` adds the eligible highlight clubs for one
+competition using its cached JSON standings.
 
 ## Browser and bot boundary
 
