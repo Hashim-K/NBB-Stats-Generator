@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleApiRequest } from "./api";
 
 type Next = (error?: unknown) => void;
+const apiPaths = new Set(["/api/nbb-options", "/api/nbb-stats"]);
 
 function requestUrl(request: IncomingMessage) {
   const host = request.headers.host ?? "localhost";
@@ -28,7 +29,7 @@ export function createApiMiddleware() {
   return async (request: IncomingMessage, response: ServerResponse, next?: Next) => {
     try {
       const url = requestUrl(request);
-      if (url.pathname !== "/api/nbb-stats") { next?.(); return; }
+      if (!apiPaths.has(url.pathname)) { next?.(); return; }
       const webRequest = new Request(url, {
         method: request.method,
         headers: request.headers as HeadersInit,

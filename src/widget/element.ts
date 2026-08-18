@@ -6,6 +6,16 @@ import {
   withCalculatedRecords,
 } from "./direct-normalize";
 import { widgetRequestUrl } from "../generator/snippet";
+import {
+  defaultGameColumns,
+  defaultStandingsColumns,
+  gameColumnDefinitions,
+  gameColumnKeys,
+  standingsColumnDefinitions,
+  standingsColumnKeys,
+  type GameColumnKey,
+  type StandingsColumnKey,
+} from "./columns";
 import { widgetStyles } from "./styles";
 import { withBrowserRequestThrottle } from "./throttle";
 import type {
@@ -69,13 +79,32 @@ function enumAttribute<T extends string>(host: Element, name: string, values: re
   return value && (values as readonly string[]).includes(value) ? value as T : fallback;
 }
 
+function booleanAttribute(host: Element, name: string, fallback: boolean) {
+  const value = host.getAttribute(name);
+  if (value === null) return fallback;
+  return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+
+function listAttribute<T extends string>(
+  host: Element,
+  name: string,
+  allowed: readonly T[],
+  fallback: readonly T[],
+) {
+  const raw = host.getAttribute(name);
+  if (raw === null) return [...fallback];
+  const selected = raw.split(",").map((entry) => entry.trim())
+    .filter((entry): entry is T => (allowed as readonly string[]).includes(entry));
+  return selected.length ? [...new Set(selected)] : [...fallback];
+}
+
 function commonConfig(host: Element) {
   const apiUrl = host.getAttribute("api-url") || undefined;
   const season = host.getAttribute("season");
   if (!season || !/^\d{4}-\d{4}$/.test(season)) throw new TypeError("season must use YYYY-YYYY");
   return {
     ...(apiUrl ? { apiUrl } : {}),
-    clubId: positiveAttribute(host, "club-id", true)!,
+    clubId: positiveAttribute(host, "club-id"),
     season,
     locale: enumAttribute(host, "locale", ["en", "nl"] as const, "nl"),
     theme: enumAttribute(host, "theme", ["auto", "dark", "light"] as const, "auto"),
@@ -130,84 +159,298 @@ function gameCard(game: WidgetGame, locale: WidgetLocale) {
   return card;
 }
 
-function cell(text: string, className?: string, header = false) {
-  return node(header ? "th" : "td", { className, text });
+function cellValue(value: string | number | undefined) {
+  return value === undefined || value === "" ? "–" : String(value);
 }
 
-function gamesTable(games: WidgetGame[], locale: WidgetLocale) {
-  const wrap = node("div", { className: "table-wrap" });
-  const table = node("table");
-  const head = node("thead");
-  const row = node("tr");
-  const labels = locale === "nl"
-    ? ["Datum", "Tijd", "Thuis", "Uit", "Uitslag", "Locatie"]
-    : ["Date", "Time", "Home", "Away", "Result", "Venue"];
-  labels.forEach((label) => row.append(cell(label, undefined, true)));
-  head.append(row);
-  const body = node("tbody");
-  for (const game of games) {
-    const item = node("tr");
-    item.append(
-      cell(date(game.startAt, locale)),
-      cell(time(game.startAt, locale)),
-      cell(game.homeTeam),
-      cell(game.awayTeam),
-      cell(game.completed ? `${game.homeScore ?? "–"}–${game.awayScore ?? "–"}` : "–", "number"),
-      cell([game.venue, game.city].filter(Boolean).join(", ") || "–"),
-    );
-    body.append(item);
+function amsterdamParts(value: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Amsterdam",
+    year: "numeric",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((entry) => entry.type === type)?.value);
+  return { day: part("day"), month: part("month"), year: part("year") };
+}
+
+function localizedDate(value: string, locale: WidgetLocale) {
+  return new Intl.DateTimeFormat(locale === "nl" ? "nl-NL" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Amsterdam",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function localizedDateTime(value: string, locale: WidgetLocale) {
+  return new Intl.DateTimeFormat(locale === "nl" ? "nl-NL" : "en-GB", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Europe/Amsterdam",
+  }).format(new Date(value));
+}
+
+function weekday(value: string, locale: WidgetLocale) {
+  return new Intl.DateTimeFormat(locale === "nl" ? "nl-NL" : "en-GB", {
+    timeZone: "Europe/Amsterdam",
+    weekday: "long",
+  }).format(new Date(value));
+}
+
+function month(value: string, locale: WidgetLocale) {
+  return new Intl.DateTimeFormat(locale === "nl" ? "nl-NL" : "en-GB", {
+    month: "long",
+    timeZone: "Europe/Amsterdam",
+  }).format(new Date(value));
+}
+
+function quarter(game: WidgetGame, label: string, side: "away" | "home") {
+  return (game.quarterScores ?? []).find((score) => score.label === label)?.[side];
+}
+
+function gameValue(game: WidgetGame, key: GameColumnKey, locale: WidgetLocale): string | number | undefined {
+  const parts = amsterdamParts(game.startAt);
+  const dayNumber = (new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay() + 6) % 7 + 1;
+  switch (key) {
+    case "nr": return game.gameNumber;
+    case "datum_f": return localizedDate(game.startAt, locale);
+    case "dag_nr": return dayNumber;
+    case "dag": return weekday(game.startAt, locale);
+    case "maand_nr": return parts.month;
+    case "maand": return month(game.startAt, locale);
+    case "tijd": return time(game.startAt, locale);
+    case "datum_tijd": return localizedDateTime(game.startAt, locale);
+    case "wed_letter": return game.gameLetter;
+    case "cmp_id": return game.competitionId;
+    case "cmp_nr": return game.competitionNumber;
+    case "cmp_naam": return game.competitionName;
+    case "thuis_ploeg_id": return game.homeTeamId;
+    case "thuis_ploeg": return game.homeTeam;
+    case "logo_thuis": return game.homeLogo;
+    case "uit_ploeg_id": return game.awayTeamId;
+    case "uit_ploeg": return game.awayTeam;
+    case "logo_uit": return game.awayLogo;
+    case "loc_id": return game.locationId;
+    case "loc_naam": return game.venue;
+    case "veld": return game.court;
+    case "loc_plaats": return game.city;
+    case "lat": return game.latitude;
+    case "lon": return game.longitude;
+    case "uitslag": return game.completed ? `${game.homeScore ?? ""}-${game.awayScore ?? ""}` : undefined;
+    case "score_thuis": return game.homeScore;
+    case "score_uit": return game.awayScore;
+    case "score_thuis_1e_kwart": return quarter(game, "Q1", "home");
+    case "score_uit_1e_kwart": return quarter(game, "Q1", "away");
+    case "score_thuis_rust": return quarter(game, "HT", "home");
+    case "score_uit_rust": return quarter(game, "HT", "away");
+    case "score_thuis_3e_kwart": return quarter(game, "Q3", "home");
+    case "score_uit_3e_kwart": return quarter(game, "Q3", "away");
+    case "datum": return game.startAt;
+    case "id": return game.id;
   }
-  table.append(head, body);
-  wrap.append(table);
-  return wrap;
 }
 
-function standingsTable(
-  entries: WidgetStanding[],
-  locale: WidgetLocale,
-  highlightClubId: number | undefined,
-  records: boolean,
-) {
+function standingValue(entry: WidgetStanding, key: StandingsColumnKey): string | number | undefined {
+  switch (key) {
+    case "positie": return entry.position;
+    case "rang": return entry.rank;
+    case "team": return entry.team;
+    case "afko": return entry.abbreviation;
+    case "clb_id": return entry.clubId;
+    case "status": return entry.status;
+    case "logo": return entry.logo;
+    case "gespeeld": return entry.played;
+    case "gewonnen": return entry.wins;
+    case "verloren": return entry.losses;
+    case "gelijk": return entry.draws;
+    case "punten": return entry.points;
+    case "percentage": return entry.percentage === undefined ? undefined : `${entry.percentage}%`;
+    case "eigenscore": return entry.pointsFor;
+    case "tegenscore": return entry.pointsAgainst;
+    case "saldo": return entry.difference > 0 ? `+${entry.difference}` : entry.difference;
+    case "datum": return entry.lastGameAt;
+    case "ID": return entry.teamId;
+  }
+}
+
+function compareValues(left: string | number | undefined, right: string | number | undefined) {
+  if (left === undefined) return right === undefined ? 0 : 1;
+  if (right === undefined) return -1;
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right), "nl", { numeric: true });
+}
+
+function logoCell(url: string | undefined) {
+  const cell = node("td");
+  if (!url) { cell.textContent = "–"; return cell; }
+  const logo = node("img", { className: "table-logo" });
+  logo.src = url;
+  logo.alt = "";
+  logo.loading = "lazy";
+  logo.referrerPolicy = "no-referrer";
+  cell.append(logo);
+  return cell;
+}
+
+function isoWeek(game: WidgetGame, locale: WidgetLocale) {
+  const parts = amsterdamParts(game.startAt);
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const day = (date.getUTCDay() + 6) % 7;
+  const monday = new Date(date);
+  monday.setUTCDate(date.getUTCDate() - day);
+  const thursday = new Date(monday);
+  thursday.setUTCDate(monday.getUTCDate() + 3);
+  const first = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
+  const firstDay = (first.getUTCDay() + 6) % 7;
+  const firstMonday = new Date(first);
+  firstMonday.setUTCDate(first.getUTCDate() - firstDay);
+  const week = 1 + Math.round((monday.getTime() - firstMonday.getTime()) / 604_800_000);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const format = new Intl.DateTimeFormat(locale === "nl" ? "nl-NL" : "en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  const label = locale === "nl"
+    ? `Week ${week} (${format.format(monday)} – ${format.format(sunday)} ${sunday.getUTCFullYear()})`
+    : `Week ${week} (${format.format(monday)} – ${format.format(sunday)} ${sunday.getUTCFullYear()})`;
+  return { key: `${thursday.getUTCFullYear()}-${String(week).padStart(2, "0")}`, label };
+}
+
+function gamesTable(games: WidgetGame[], config: GamesWidgetConfig) {
   const wrap = node("div", { className: "table-wrap" });
-  const table = node("table");
-  const head = node("thead");
-  const row = node("tr");
-  const labels = locale === "nl"
-    ? ["#", "Team", "G", ...(records ? ["W", "V", "G"] : []), "Pnt", "+", "−", "+/−"]
-    : ["#", "Team", "GP", ...(records ? ["W", "L", "D"] : []), "Pts", "+", "−", "+/−"];
-  labels.forEach((label, index) => row.append(cell(label, index === 1 ? undefined : "number", true)));
-  head.append(row);
-  const body = node("tbody");
-  for (const entry of entries) {
-    const item = node("tr", { className: entry.clubId === highlightClubId ? "highlight" : undefined });
-    const team = cell("");
-    const teamLabel = node("span", { className: "standing-team" });
-    teamLabel.append(mark(entry.team), node("span", { text: entry.team }));
-    team.append(teamLabel);
-    const values = [
-      cell(String(entry.position), "number"),
-      team,
-      cell(String(entry.played), "number"),
-    ];
-    if (records) {
-      values.push(
-        cell(entry.wins === undefined ? "–" : String(entry.wins), "number"),
-        cell(entry.losses === undefined ? "–" : String(entry.losses), "number"),
-        cell(entry.draws === undefined ? "–" : String(entry.draws), "number"),
-      );
+  let sort: { direction: 1 | -1; key: GameColumnKey } | undefined;
+  const labels = new Map(gameColumnDefinitions.map((definition) => [definition.key, definition.label[config.locale]]));
+
+  const render = () => {
+    const table = node("table");
+    table.className = config.tableClass;
+    const head = node("thead");
+    const header = node("tr");
+    for (const key of config.columns) {
+      const th = node("th");
+      const label = labels.get(key) ?? key;
+      th.textContent = `${label}${sort?.key === key ? (sort.direction === 1 ? " ▲" : " ▼") : ""}`;
+      if (config.enableSorting) {
+        th.tabIndex = 0;
+        th.setAttribute("role", "button");
+        th.setAttribute("aria-sort", sort?.key === key ? (sort.direction === 1 ? "ascending" : "descending") : "none");
+        const activate = () => {
+          sort = sort?.key === key ? { key, direction: sort.direction === 1 ? -1 : 1 } : { key, direction: 1 };
+          render();
+        };
+        th.addEventListener("click", activate);
+        th.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") activate(); });
+      }
+      header.append(th);
     }
-    values.push(
-      cell(String(entry.points), "number"),
-      cell(String(entry.pointsFor), "number"),
-      cell(String(entry.pointsAgainst), "number"),
-      cell(entry.difference > 0 ? `+${entry.difference}` : String(entry.difference), "number"),
-    );
-    item.append(...values);
-    body.append(item);
-  }
-  table.append(head, body);
-  wrap.append(table);
+    head.append(header);
+    const body = node("tbody");
+    const sorted = sort
+      ? [...games].sort((left, right) => sort!.direction * compareValues(
+          gameValue(left, sort!.key, config.locale),
+          gameValue(right, sort!.key, config.locale),
+        ))
+      : games;
+    const grouped = new Map<string, WidgetGame[]>();
+    if (config.groupByWeek) {
+      for (const game of sorted) {
+        const key = isoWeek(game, config.locale).key;
+        const group = grouped.get(key) ?? [];
+        group.push(game);
+        grouped.set(key, group);
+      }
+    }
+    const groups: Array<[string, WidgetGame[]]> = config.groupByWeek
+      ? [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))
+      : [["", sorted]];
+    let rowIndex = 0;
+    for (const [, group] of groups) {
+      if (config.groupByWeek && group.length) {
+        const groupRow = node("tr", { className: "week-group" });
+        const groupCell = node("td", { text: isoWeek(group[0]!, config.locale).label });
+        groupCell.colSpan = Math.max(1, config.columns.length);
+        groupRow.append(groupCell);
+        body.append(groupRow);
+      }
+      for (const game of group) {
+        const row = node("tr");
+        row.style.backgroundColor = rowIndex % 2 === 0 ? config.evenRowColor : config.oddRowColor;
+        rowIndex += 1;
+        for (const key of config.columns) {
+          if (key === "logo_thuis" || key === "logo_uit") {
+            row.append(logoCell(gameValue(game, key, config.locale) as string | undefined));
+          } else {
+            row.append(node("td", { text: cellValue(gameValue(game, key, config.locale)) }));
+          }
+        }
+        body.append(row);
+      }
+    }
+    table.append(head, body);
+    wrap.replaceChildren(table);
+  };
+  render();
   return wrap;
+}
+
+function standingsTable(response: StandingsResponse, config: StandingsWidgetConfig) {
+  const container = node("div", { className: "standings-table" });
+  const wrap = node("div", { className: "table-wrap" });
+  let sort: { direction: 1 | -1; key: StandingsColumnKey } | undefined;
+  const labels = new Map(standingsColumnDefinitions.map((definition) => [definition.key, definition.label[config.locale]]));
+  if (config.showMeta) {
+    const parts = [
+      response.data.name,
+      response.data.season,
+      config.locale === "nl" ? `${response.data.entries.length} teams` : `${response.data.entries.length} teams`,
+    ].filter(Boolean);
+    container.append(node("p", { className: "standings-meta", text: parts.join(" · ") }));
+  }
+  const render = () => {
+    const table = node("table");
+    table.className = config.tableClass;
+    const head = node("thead");
+    const header = node("tr");
+    for (const key of config.columns) {
+      const th = node("th");
+      th.textContent = `${labels.get(key) ?? key}${sort?.key === key ? (sort.direction === 1 ? " ▲" : " ▼") : ""}`;
+      if (config.enableSorting) {
+        th.tabIndex = 0;
+        th.setAttribute("role", "button");
+        th.setAttribute("aria-sort", sort?.key === key ? (sort.direction === 1 ? "ascending" : "descending") : "none");
+        const activate = () => {
+          sort = sort?.key === key ? { key, direction: sort.direction === 1 ? -1 : 1 } : { key, direction: 1 };
+          render();
+        };
+        th.addEventListener("click", activate);
+        th.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") activate(); });
+      }
+      header.append(th);
+    }
+    head.append(header);
+    const body = node("tbody");
+    const entries = sort
+      ? [...response.data.entries].sort((left, right) => sort!.direction * compareValues(
+          standingValue(left, sort!.key), standingValue(right, sort!.key),
+        ))
+      : response.data.entries;
+    entries.forEach((entry, index) => {
+      const row = node("tr", { className: entry.clubId === config.highlightClubId ? "highlight" : undefined });
+      row.style.backgroundColor = entry.clubId === config.highlightClubId
+        ? config.highlightColor
+        : index % 2 === 0 ? config.evenRowColor : config.oddRowColor;
+      for (const key of config.columns) {
+        if (key === "logo") row.append(logoCell(entry.logo));
+        else row.append(node("td", { text: cellValue(standingValue(entry, key)) }));
+      }
+      body.append(row);
+    });
+    table.append(head, body);
+    wrap.replaceChildren(table);
+  };
+  render();
+  container.append(wrap);
+  return container;
 }
 
 function standingsBars(entries: WidgetStanding[], highlightClubId?: number) {
@@ -255,12 +498,17 @@ async function request(url: string, config: WidgetConfig): Promise<WidgetRespons
     const gamesConfig: GamesWidgetConfig = {
       accent: config.accent,
       clubId: config.clubId,
+      columns: defaultGameColumns,
       competitionId: config.competitionId,
+      enableSorting: true,
+      evenRowColor: "#ffffff",
+      groupByWeek: false,
       kind: "games",
       layout: "cards",
-      limit: 50,
       locale: config.locale,
+      oddRowColor: "#f2f4f7",
       season: config.season,
+      tableClass: "wedstrijd-table",
       theme: config.theme,
       venue: "all",
       view: "all",
@@ -339,18 +587,34 @@ abstract class NbbElement extends HTMLElementBase {
 }
 
 export class NbbGamesElement extends NbbElement {
-  static observedAttributes = ["api-url", "club-id", "season", "team-id", "competition-id", "layout", "limit", "locale", "theme", "accent", "venue", "view"];
+  static observedAttributes = [
+    "api-url", "club-id", "season", "team-id", "competition-id", "location-id",
+    "layout", "limit", "locale", "theme", "accent", "venue", "view", "columns",
+    "enable-sorting", "even-row-color", "odd-row-color", "group-by-week", "table-class",
+  ];
   protected config(): GamesWidgetConfig {
-    return {
+    const config: GamesWidgetConfig = {
       kind: "games",
       ...commonConfig(this),
       teamId: positiveAttribute(this, "team-id"),
       competitionId: positiveAttribute(this, "competition-id"),
-      layout: enumAttribute(this, "layout", ["cards", "table"] as const, "cards"),
-      limit: positiveAttribute(this, "limit") ?? 7,
+      locationId: positiveAttribute(this, "location-id"),
+      layout: enumAttribute(this, "layout", ["cards", "table"] as const, "table"),
+      limit: positiveAttribute(this, "limit"),
       venue: enumAttribute(this, "venue", ["all", "away", "home"] as const, "all"),
-      view: enumAttribute(this, "view", ["all", "results", "upcoming"] as const, "upcoming"),
+      view: enumAttribute(this, "view", ["all", "results", "upcoming"] as const, "all"),
+      columns: listAttribute(this, "columns", gameColumnKeys, defaultGameColumns),
+      enableSorting: booleanAttribute(this, "enable-sorting", true),
+      evenRowColor: this.getAttribute("even-row-color") || "#ffffff",
+      oddRowColor: this.getAttribute("odd-row-color") || "#f2f4f7",
+      groupByWeek: booleanAttribute(this, "group-by-week", false),
+      tableClass: this.getAttribute("table-class") || "wedstrijd-table",
     };
+    if (!config.clubId && !config.teamId && !config.competitionId && !config.locationId) {
+      throw new TypeError("games require a club, team, competition, or location");
+    }
+    if (!config.clubId && config.venue !== "all") throw new TypeError("home/away filtering requires a club");
+    return config;
   }
   protected renderPayload(payload: WidgetResponse, config: WidgetConfig) {
     if (payload.meta.resource !== "games" || config.kind !== "games") throw new TypeError("Unexpected games response");
@@ -359,7 +623,7 @@ export class NbbGamesElement extends NbbElement {
       this.content.replaceChildren(node("div", { className: "notice", text: messages[config.locale].noData }));
       return;
     }
-    if (config.layout === "table") this.content.replaceChildren(gamesTable(games, config.locale));
+    if (config.layout === "table") this.content.replaceChildren(gamesTable(games, config));
     else {
       const list = node("div", { className: "games" });
       list.append(...games.map((game) => gameCard(game, config.locale)));
@@ -369,7 +633,11 @@ export class NbbGamesElement extends NbbElement {
 }
 
 export class NbbStandingsElement extends NbbElement {
-  static observedAttributes = ["api-url", "club-id", "season", "competition-id", "highlight-club-id", "layout", "records", "locale", "theme", "accent"];
+  static observedAttributes = [
+    "api-url", "club-id", "season", "competition-id", "highlight-club-id", "layout",
+    "records", "locale", "theme", "accent", "columns", "enable-sorting",
+    "even-row-color", "odd-row-color", "highlight-color", "show-meta", "table-class",
+  ];
   protected config(): StandingsWidgetConfig {
     return {
       kind: "standings",
@@ -378,6 +646,13 @@ export class NbbStandingsElement extends NbbElement {
       highlightClubId: positiveAttribute(this, "highlight-club-id"),
       layout: enumAttribute(this, "layout", ["bars", "combined", "table"] as const, "table"),
       records: this.hasAttribute("records"),
+      columns: listAttribute(this, "columns", standingsColumnKeys, defaultStandingsColumns),
+      enableSorting: booleanAttribute(this, "enable-sorting", true),
+      evenRowColor: this.getAttribute("even-row-color") || "#ffffff",
+      oddRowColor: this.getAttribute("odd-row-color") || "#f2f4f7",
+      highlightColor: this.getAttribute("highlight-color") || "#fff3cd",
+      showMeta: booleanAttribute(this, "show-meta", false),
+      tableClass: this.getAttribute("table-class") || "stand-table",
     };
   }
   protected renderPayload(payload: WidgetResponse, config: WidgetConfig) {
@@ -387,7 +662,7 @@ export class NbbStandingsElement extends NbbElement {
       this.content.replaceChildren(node("div", { className: "notice", text: messages[config.locale].noData }));
       return;
     }
-    const table = standingsTable(entries, config.locale, config.highlightClubId, config.records);
+    const table = standingsTable(payload as StandingsResponse, config);
     const bars = standingsBars(entries, config.highlightClubId);
     if (config.layout === "table") this.content.replaceChildren(table);
     else if (config.layout === "bars") this.content.replaceChildren(bars);

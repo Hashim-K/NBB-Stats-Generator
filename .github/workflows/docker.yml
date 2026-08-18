@@ -29,8 +29,9 @@ jobs:
         with:
           images: ghcr.io/hashim-k/nbb-stats-generator
           tags: |
-            type=raw,value=latest
-            type=raw,value=main-${{ github.sha }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=main-${{ github.sha }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=preview-${{ github.sha }},enable=${{ github.ref != 'refs/heads/main' }}
       - uses: docker/build-push-action@v6
         with:
           context: .

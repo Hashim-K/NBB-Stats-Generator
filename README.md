@@ -56,15 +56,20 @@ The configurator produces markup like this:
 ```html
 <script defer src="https://nbb-gen.hashimkarim.com/nbb-stats-widget.js"></script>
 <nbb-games
-  club-id="57"
-  season="2026-2027"
+  season="2025-2026"
   locale="nl"
-  theme="auto"
+  theme="light"
   accent="#ef4b23"
-  layout="cards"
-  limit="7"
+  competition-id="3498"
+  layout="table"
   venue="all"
-  view="upcoming"
+  view="all"
+  columns="datum_f,tijd,thuis_ploeg,uit_ploeg,uitslag,loc_naam"
+  enable-sorting="true"
+  even-row-color="#ffffff"
+  odd-row-color="#f2f4f7"
+  group-by-week="false"
+  table-class="wedstrijd-table"
 ></nbb-games>
 ```
 
@@ -78,28 +83,64 @@ website origin—not to the generator.
 
 | Attribute | Required | Values / meaning |
 | --- | --- | --- |
-| `club-id` | yes | Basketballstats club ID |
+| `club-id` | conditional | Basketballstats club ID |
 | `season` | yes | `YYYY-YYYY` |
-| `team-id` | no | Limit the source/query to one team |
-| `competition-id` | no | Limit the source/query to one competition |
-| `view` | no | `upcoming`, `results`, or `all` |
-| `venue` | no | `home`, `away`, or `all` |
-| `limit` | no | Maximum rendered games; default `7` |
-| `layout` | no | `cards` or `table` |
+| `team-id` | conditional | Limit the source/query to one team |
+| `competition-id` | conditional | Limit the source/query to one competition |
+| `location-id` | conditional | Limit the source/query to one location |
+| `view` | no | `upcoming`, `results`, or `all` (default) |
+| `venue` | no | `home`, `away`, or `all` (default); home/away needs `club-id` |
+| `limit` | no | Maximum rendered games; omitted means all |
+| `layout` | no | `table` (default) or `cards` |
+| `columns` | no | Comma-separated field keys; omitted/empty uses Jaap's defaults |
+| `enable-sorting` | no | Boolean; default `true` |
+| `group-by-week` | no | Boolean; default `false` |
+| `even-row-color` / `odd-row-color` | no | Table row colours |
+| `table-class` | no | Table class; default `wedstrijd-table` |
+
+At least one of `club-id`, `team-id`, `competition-id`, or `location-id` is
+required. The configurator offers every field in Jaap's games configurator,
+plus the optional card layout and local result/upcoming, venue, and limit
+filters.
 
 ### Standings attributes
 
 | Attribute | Required | Values / meaning |
 | --- | --- | --- |
-| `club-id` | yes | Club highlighted by default |
 | `season` | yes | `YYYY-YYYY` |
 | `competition-id` | yes | Basketballstats competition ID |
 | `highlight-club-id` | no | Club row to highlight |
-| `layout` | no | `table`, `bars`, or `combined` |
-| `records` | no | Show W-L-D fields supplied by the standings JSON |
+| `layout` | no | `table` (default), `bars`, or `combined` |
+| `columns` | no | Comma-separated field keys; omitted/empty uses Jaap's defaults |
+| `enable-sorting` | no | Boolean; default `true` |
+| `show-meta` | no | Show competition, season, and team count; default `false` |
+| `even-row-color` / `odd-row-color` | no | Table row colours |
+| `highlight-color` | no | Highlighted club row colour |
+| `table-class` | no | Table class; default `stand-table` |
+| `records` | no | Calculate W-L-D from the separately cached competition games |
 
 Both elements support `locale="nl|en"`, `theme="auto|light|dark"`, and any
 valid CSS colour in `accent`.
+
+The initial configurator values intentionally mirror Jaap's configurators:
+competition `3498`, season `2025-2026`, table layouts/classes and colours,
+sorting enabled, grouping/meta disabled, and the same default column sets.
+The additional NBB-Stats settings start conservatively (`nl`, light theme,
+all games, no item limit, no W-L-D calculation). The source `origin` is derived
+from the page automatically instead of exposing an error-prone text field.
+
+## ID and name selection
+
+The **IDs / Names** switch changes only how source filters are selected:
+
+- **IDs** preserves the compact inputs from Jaap's original configurators.
+- **Names** loads cached club names first, then the teams, competitions, and
+  game locations for the selected club and season.
+
+Name discovery uses the persistent NBB-Stats preview cache and the same global
+15-second upstream queue. It is never included in generated embeds. On a cold
+cache, the first club/season selection can therefore take a little while;
+subsequent visitors use the shared stored result.
 
 ## Run locally
 
@@ -166,8 +207,11 @@ Environment variables:
 | `HOST` | `0.0.0.0` | Node listener |
 | `PORT` | `4173` | Node listener |
 
-The preview route is `GET /api/nbb-stats`. It accepts browser requests only,
-rate-limits clients, and puts recognised crawlers into cache-only mode.
+The preview routes are `GET /api/nbb-stats` and `GET /api/nbb-options`. They
+accept browser requests only, rate-limit clients, and put recognised crawlers
+into cache-only mode. `/api/nbb-options?resource=clubs` returns the club index;
+`/api/nbb-options?resource=club&clubId=57&season=2025-2026` returns named
+teams, competitions, and locations for one selection.
 
 ## Browser and bot boundary
 

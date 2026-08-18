@@ -167,6 +167,16 @@ function games(payload: unknown, config: GamesWidgetConfig, now: Date): GamesRes
     const homeScore = numberAt(raw, ["score_thuis"]);
     const awayScore = numberAt(raw, ["score_uit"]);
     const homeClubId = requiredNumber(raw, ["thuis_club_id"], "home club ID");
+    const quarterScores = [
+      { label: "Q1", home: numberAt(raw, ["score_thuis_1e_kwart"]), away: numberAt(raw, ["score_uit_1e_kwart"]) },
+      { label: "HT", home: numberAt(raw, ["score_thuis_rust"]), away: numberAt(raw, ["score_uit_rust"]) },
+      { label: "Q3", home: numberAt(raw, ["score_thuis_3e_kwart"]), away: numberAt(raw, ["score_uit_3e_kwart"]) },
+      { label: "FT", home: homeScore, away: awayScore },
+    ].map(({ label, home, away }) => ({
+      label,
+      ...(home === undefined ? {} : { home }),
+      ...(away === undefined ? {} : { away }),
+    }));
     return {
       id: textAt(raw, ["id", "wed_ID"]),
       season,
@@ -177,12 +187,23 @@ function games(payload: unknown, config: GamesWidgetConfig, now: Date): GamesRes
       awayTeamId: requiredNumber(raw, ["uit_ploeg_id"], "away team ID"),
       homeClubId,
       awayClubId: requiredNumber(raw, ["uit_club_id"], "away club ID"),
+      ...(textAt(raw, ["logo_thuis"]) ? { homeLogo: textAt(raw, ["logo_thuis"]) } : {}),
+      ...(textAt(raw, ["logo_uit"]) ? { awayLogo: textAt(raw, ["logo_uit"]) } : {}),
       ...(homeScore === undefined ? {} : { homeScore }),
       ...(awayScore === undefined ? {} : { awayScore }),
       ...(textAt(raw, ["loc_naam"]) ? { venue: textAt(raw, ["loc_naam"]) } : {}),
       ...(textAt(raw, ["loc_plaats"]) ? { city: textAt(raw, ["loc_plaats"]) } : {}),
+      ...(textAt(raw, ["veld"]) ? { court: textAt(raw, ["veld"]) } : {}),
+      ...(numberAt(raw, ["loc_id"]) === undefined ? {} : { locationId: numberAt(raw, ["loc_id"]) }),
+      ...(numberAt(raw, ["lat"]) === undefined ? {} : { latitude: numberAt(raw, ["lat"]) }),
+      ...(numberAt(raw, ["lon"]) === undefined ? {} : { longitude: numberAt(raw, ["lon"]) }),
       competitionId: requiredNumber(raw, ["cmp_id", "cmp_ID"], "competition ID"),
-      selectedClubAtHome: homeClubId === config.clubId,
+      ...(textAt(raw, ["cmp_naam"]) ? { competitionName: textAt(raw, ["cmp_naam"]) } : {}),
+      ...(textAt(raw, ["cmp_nr"]) ? { competitionNumber: textAt(raw, ["cmp_nr"]) } : {}),
+      ...(textAt(raw, ["wed_letter"]) ? { gameLetter: textAt(raw, ["wed_letter"]) } : {}),
+      ...(textAt(raw, ["nr", "wed_nr"]) ? { gameNumber: textAt(raw, ["nr", "wed_nr"]) } : {}),
+      quarterScores,
+      selectedClubAtHome: config.clubId !== undefined && homeClubId === config.clubId,
       completed: homeScore !== undefined && awayScore !== undefined,
     };
   });
@@ -208,8 +229,12 @@ function standings(payload: unknown, config: StandingsWidgetConfig, now: Date): 
       teamId: requiredNumber(raw, ["ID", "id", "plg_ID"], "team ID"),
       clubId: requiredNumber(raw, ["clb_id", "club_id"], "club ID"),
       position: requiredNumber(raw, ["positie", "position"], "position"),
+      rank: numberAt(raw, ["rang"], requiredNumber(raw, ["positie", "position"], "position"))!,
       team: textAt(raw, ["team", "naam"]),
       ...(textAt(raw, ["afko"]) ? { abbreviation: textAt(raw, ["afko"]) } : {}),
+      ...(textAt(raw, ["status"]) ? { status: textAt(raw, ["status"]) } : {}),
+      ...(textAt(raw, ["logo"]) ? { logo: textAt(raw, ["logo"]) } : {}),
+      ...(textAt(raw, ["datum"]) ? { lastGameAt: textAt(raw, ["datum"]) } : {}),
       played: numberAt(raw, ["gespeeld", "played"], 0) ?? 0,
       ...(numberAt(raw, ["gewonnen", "wins"]) === undefined
         ? {}
@@ -224,6 +249,9 @@ function standings(payload: unknown, config: StandingsWidgetConfig, now: Date): 
       pointsFor: numberAt(raw, ["eigenscore", "points_for"], 0) ?? 0,
       pointsAgainst: numberAt(raw, ["tegenscore", "points_against"], 0) ?? 0,
       difference: numberAt(raw, ["saldo", "difference"], 0) ?? 0,
+      ...(numberAt(raw, ["percentage"]) === undefined
+        ? {}
+        : { percentage: numberAt(raw, ["percentage"]) }),
     }))
     .sort((left, right) => left.position - right.position);
   return {
@@ -257,14 +285,21 @@ export function normalizeBasketballstatsResponse(
 /** Apply display filters locally so changing a layout does not refetch data. */
 export function visibleGames(games: WidgetGame[], config: GamesWidgetConfig, now = Date.now()) {
   return games
-    .filter((game) => game.homeClubId === config.clubId || game.awayClubId === config.clubId)
+    .filter((game) => config.clubId === undefined
+      || game.homeClubId === config.clubId
+      || game.awayClubId === config.clubId)
     .filter((game) => config.teamId === undefined
       || game.homeTeamId === config.teamId
       || game.awayTeamId === config.teamId)
     .filter((game) => config.competitionId === undefined
       || game.competitionId === config.competitionId)
+    .filter((game) => config.locationId === undefined
+      || game.locationId === config.locationId)
     .filter((game) => config.venue === "all"
-      || game.selectedClubAtHome === (config.venue === "home"))
+      || (config.clubId !== undefined
+        && (config.venue === "home"
+          ? game.homeClubId === config.clubId
+          : game.awayClubId === config.clubId)))
     .filter((game) => {
       if (config.view === "results") return game.completed;
       if (config.view === "upcoming") return !game.completed && Date.parse(game.startAt) >= now;
@@ -274,7 +309,7 @@ export function visibleGames(games: WidgetGame[], config: GamesWidgetConfig, now
       const difference = Date.parse(left.startAt) - Date.parse(right.startAt);
       return config.view === "results" ? -difference : difference;
     })
-    .slice(0, config.limit);
+    .slice(0, config.limit ?? games.length);
 }
 
 export function withCalculatedRecords(

@@ -22,7 +22,7 @@ function escapeAttribute(value: string) {
     .replaceAll(">", "&gt;");
 }
 
-function optional(name: string, value: string | number | undefined) {
+function optional(name: string, value: boolean | string | number | undefined) {
   return value === undefined || value === ""
     ? undefined
     : `${name}="${escapeAttribute(String(value))}"`;
@@ -42,16 +42,14 @@ export function widgetRequestUrl(config: WidgetConfig, base?: string) {
 
   const url = assertSafeGatewayUrl(config.apiUrl, base);
   url.searchParams.set("resource", config.kind);
-  url.searchParams.set("clubId", positive(config.clubId, "clubId"));
+  if (config.clubId) url.searchParams.set("clubId", positive(config.clubId, "clubId"));
   url.searchParams.set("season", config.season);
   if (config.kind === "games") {
     if (config.teamId) url.searchParams.set("teamId", positive(config.teamId, "teamId"));
     if (config.competitionId) {
       url.searchParams.set("competitionId", positive(config.competitionId, "competitionId"));
     }
-    url.searchParams.set("limit", positive(config.limit, "limit"));
-    url.searchParams.set("venue", config.venue);
-    url.searchParams.set("view", config.view);
+    if (config.locationId) url.searchParams.set("locationId", positive(config.locationId, "locationId"));
   } else {
     url.searchParams.set("competitionId", positive(config.competitionId, "competitionId"));
     if (config.records) url.searchParams.set("records", "1");
@@ -78,16 +76,17 @@ export function basketballstatsRequestUrl(config: WidgetConfig, base?: string) {
     }
   })();
   url.searchParams.set("origin", pageOrigin);
-  url.searchParams.set("seizoen", config.season);
   if (config.kind === "games") {
-    if (config.teamId) {
-      url.searchParams.set("plg_ID", positive(config.teamId, "teamId"));
-    } else if (config.competitionId) {
-      url.searchParams.set("cmp_ID", positive(config.competitionId, "competitionId"));
-    } else {
-      url.searchParams.set("clb_ID", positive(config.clubId, "clubId"));
+    url.searchParams.set("seizoen", config.season);
+    if (!config.clubId && !config.teamId && !config.competitionId && !config.locationId) {
+      throw new TypeError("games require a club, team, competition, or location");
     }
+    if (config.clubId) url.searchParams.set("clb_ID", positive(config.clubId, "clubId"));
+    if (config.teamId) url.searchParams.set("plg_ID", positive(config.teamId, "teamId"));
+    if (config.competitionId) url.searchParams.set("cmp_ID", positive(config.competitionId, "competitionId"));
+    if (config.locationId) url.searchParams.set("loc_ID", positive(config.locationId, "locationId"));
   } else {
+    url.searchParams.set("szn_Naam", config.season);
     url.searchParams.set("cmp_ID", positive(config.competitionId, "competitionId"));
     // Fragments are not sent over HTTP. This only separates the local cache
     // entry that also contains records calculated from competition games.
@@ -101,8 +100,15 @@ export function generateSnippet(
   config: WidgetConfig,
   scriptUrl = NBB_STATS_WIDGET_SCRIPT_URL,
 ) {
+  if (config.kind === "games"
+    && !config.clubId
+    && !config.teamId
+    && !config.competitionId
+    && !config.locationId) {
+    throw new TypeError("games require a club, team, competition, or location");
+  }
   const attributes: Array<string | undefined> = [
-    `club-id="${positive(config.clubId, "clubId")}"`,
+    optional("club-id", config.clubId),
     `season="${escapeAttribute(config.season)}"`,
     optional("locale", config.locale),
     optional("theme", config.theme),
@@ -112,16 +118,30 @@ export function generateSnippet(
     attributes.push(
       optional("team-id", config.teamId),
       optional("competition-id", config.competitionId),
+      optional("location-id", config.locationId),
       optional("layout", config.layout),
       optional("limit", config.limit),
       optional("venue", config.venue),
       optional("view", config.view),
+      optional("columns", config.columns.join(",")),
+      optional("enable-sorting", config.enableSorting),
+      optional("even-row-color", config.evenRowColor),
+      optional("odd-row-color", config.oddRowColor),
+      optional("group-by-week", config.groupByWeek),
+      optional("table-class", config.tableClass),
     );
   } else {
     attributes.push(
       `competition-id="${positive(config.competitionId, "competitionId")}"`,
       optional("highlight-club-id", config.highlightClubId),
       optional("layout", config.layout),
+      optional("columns", config.columns.join(",")),
+      optional("enable-sorting", config.enableSorting),
+      optional("even-row-color", config.evenRowColor),
+      optional("odd-row-color", config.oddRowColor),
+      optional("highlight-color", config.highlightColor),
+      optional("show-meta", config.showMeta),
+      optional("table-class", config.tableClass),
       config.records ? "records" : undefined,
     );
   }

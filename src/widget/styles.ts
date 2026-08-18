@@ -49,8 +49,13 @@ export const widgetStyles = `
 table { width: 100%; border-collapse: collapse; font-size: .86rem; }
 th, td { padding: .72rem .78rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); background: var(--surface-2); font-size: .7rem; letter-spacing: .05em; text-transform: uppercase; }
+th[role="button"] { cursor: pointer; user-select: none; }
+th[role="button"]:focus-visible { outline: 2px solid var(--nbb-accent); outline-offset: -3px; }
 tr:last-child td { border-bottom: 0; }
 tr.highlight td { background: color-mix(in srgb, var(--nbb-accent) 10%, var(--surface)); }
+.table-logo { display: block; width: 2rem; height: 2rem; object-fit: contain; }
+.week-group td { color: var(--muted); background: var(--surface-2) !important; font-size: .72rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.standings-meta { margin: 0 0 .7rem; color: var(--muted); font-size: .76rem; }
 .number { text-align: right; font-variant-numeric: tabular-nums; }
 .standing-team { display: flex; align-items: center; gap: .55rem; }
 .standing-team .mark { width: 1.65rem; height: 1.65rem; }

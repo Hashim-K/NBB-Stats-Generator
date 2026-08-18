@@ -14,6 +14,7 @@ import {
   visibleGames,
   withCalculatedRecords,
 } from "../src/widget/direct-normalize";
+import { defaultGameColumns, defaultStandingsColumns } from "../src/widget/columns";
 import { registerNbbStatsWidget } from "../src/widget/element";
 import {
   requestScope,
@@ -34,11 +35,17 @@ class TestStorage implements Storage {
 const gamesConfig: GamesWidgetConfig = {
   accent: "#ef4b23",
   clubId: 57,
+  columns: defaultGameColumns,
+  enableSorting: true,
+  evenRowColor: "#ffffff",
+  groupByWeek: false,
   kind: "games",
   layout: "cards",
   limit: 7,
   locale: "nl",
+  oddRowColor: "#f2f4f7",
   season: "2026-2027",
+  tableClass: "wedstrijd-table",
   theme: "auto",
   venue: "all",
   view: "upcoming",
@@ -95,6 +102,18 @@ describe("generated embed data path", () => {
     expect(snippet).not.toContain("basketballstats.nl/db/json/nbb-stats-widget.js");
     expect(snippet).toContain("<nbb-games");
     expect(snippet).not.toContain("api-url");
+    expect(snippet).toContain('columns="datum_f,tijd,thuis_ploeg,uit_ploeg,uitslag,loc_naam"');
+    expect(snippet).toContain('enable-sorting="true"');
+    expect(snippet).toContain('table-class="wedstrijd-table"');
+  });
+
+  it("supports Jaap's four alternative games filters and rejects an unbounded query", () => {
+    const locationOnly = { ...gamesConfig, clubId: undefined, limit: undefined, locationId: 20 };
+    const direct = widgetRequestUrl(locationOnly, "https://club.example");
+    expect(direct.searchParams.get("loc_ID")).toBe("20");
+    expect(direct.searchParams.has("clb_ID")).toBe(false);
+    expect(() => generateSnippet({ ...locationOnly, locationId: undefined }))
+      .toThrow("games require a club, team, competition, or location");
   });
 
   it("uses direct Basketballstats JSON for embeds and NBB-Stats for previews", () => {
@@ -109,18 +128,32 @@ describe("generated embed data path", () => {
     });
     expect(preview.origin).toBe("https://generator.example");
     expect(preview.searchParams.get("resource")).toBe("games");
+    expect(widgetRequestUrl({
+      ...gamesConfig,
+      apiUrl: "https://generator.example/api/nbb-stats",
+      limit: 1,
+      venue: "home",
+      view: "results",
+    }).toString()).toBe(preview.toString());
   });
 
   it("uses an unsent fragment to separate standings-with-records browser cache entries", () => {
     const url = widgetRequestUrl({
       accent: "#ef4b23",
       clubId: 57,
+      columns: defaultStandingsColumns,
       competitionId: 4180,
+      enableSorting: true,
+      evenRowColor: "#ffffff",
+      highlightColor: "#fff3cd",
       kind: "standings",
       layout: "combined",
       locale: "nl",
+      oddRowColor: "#f2f4f7",
       records: true,
       season: "2026-2027",
+      showMeta: false,
+      tableClass: "stand-table",
       theme: "auto",
     }, "https://club.example");
     expect(url.hostname).toBe("www.basketballstats.nl");
@@ -167,12 +200,19 @@ describe("direct response protection", () => {
     }, {
       accent: "#ef4b23",
       clubId: 57,
+      columns: defaultStandingsColumns,
       competitionId: 4180,
+      enableSorting: true,
+      evenRowColor: "#ffffff",
+      highlightColor: "#fff3cd",
       kind: "standings",
       layout: "table",
       locale: "nl",
+      oddRowColor: "#f2f4f7",
       records: true,
       season: "2026-2027",
+      showMeta: false,
+      tableClass: "stand-table",
       theme: "auto",
     }, new Date("2026-08-18T12:00:00Z")) as StandingsResponse;
     const gameResponse = normalizeBasketballstatsResponse(rawGames, gamesConfig) as GamesResponse;

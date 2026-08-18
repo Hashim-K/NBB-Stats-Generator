@@ -41,7 +41,7 @@ const server = createServer((request, response) => {
     response.end('{"status":"ok"}');
     return;
   }
-  if (url.pathname === "/api/nbb-stats") {
+  if (url.pathname === "/api/nbb-stats" || url.pathname === "/api/nbb-options") {
     void api(request, response);
     return;
   }

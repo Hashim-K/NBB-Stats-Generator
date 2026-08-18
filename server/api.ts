@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { isCacheMiss, widgetData } from "./data";
+import { isCacheMiss, selectionOptions, widgetData } from "./data";
 import { serverConfig } from "./config";
 import { browserRequestGate, rateLimit } from "./security";
 
@@ -47,7 +47,10 @@ export async function handleApiRequest(request: Request, clientAddress = "unknow
 
   try {
     const url = new URL(request.url);
-    const payload = await widgetData(url.searchParams, gate.crawler ? "cache-only" : "wait");
+    const refresh = gate.crawler ? "cache-only" : "wait";
+    const payload = url.pathname === "/api/nbb-options"
+      ? await selectionOptions(url.searchParams, refresh)
+      : await widgetData(url.searchParams, refresh);
     const body = JSON.stringify(payload);
     const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
     const refreshAfter = payload.meta.refreshAfter;
